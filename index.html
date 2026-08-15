@@ -392,8 +392,8 @@ footer .wrap { display:flex; flex-wrap:wrap; justify-content:space-between; alig
       </form>
 
       <div id="form-exito">
-        <h3>¡Listo! 🎉 Un solo paso más:</h3>
-        <p>Toca el botón para abrir tu WhatsApp — la palabra <b style="color:var(--text)">TALLER3</b> ya va escrita. Solo envíala y te llega toda la información al instante.</p>
+        <h3 id="exito-titulo">¡Listo! 🎉 Un solo paso más:</h3>
+        <p id="exito-texto">Toca el botón para abrir tu WhatsApp — la palabra <b style="color:var(--text)">TALLER3</b> ya va escrita. Solo envíala y te llega toda la información al instante.</p>
         <a class="btn-wa" href="https://wa.me/525548407552?text=TALLER3" target="_blank" rel="noopener noreferrer" id="cta-form-wa" style="justify-content:center; width:100%;">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="#fff"><path d="M12 2a10 10 0 0 0-8.5 15.2L2 22l4.9-1.4A10 10 0 1 0 12 2zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.3-.7-2.8-1.1-4.5-3.9-4.7-4.1-.1-.2-1.1-1.4-1.1-2.7s.7-1.9.9-2.1c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.5l.8 1.9c.1.2.1.4 0 .5l-.4.6c-.1.2-.3.3-.1.6.1.3.7 1.1 1.4 1.8.9.8 1.7 1 2 1.2.2.1.4.1.5-.1l.7-.8c.2-.2.4-.2.6-.1l1.8.9c.3.1.4.2.5.3.1.3.1.7-.1 1.3z"/></svg>
           Recibir la info por WhatsApp
@@ -466,7 +466,13 @@ function enviarLead(e) {
     fbq('track', 'Lead', { content_name: 'taller3dias' });
   }
 
-  function exito() {
+  // enviado=true → el backend ya mandó la info por plantilla de WhatsApp;
+  // el botón queda como respaldo. false → flujo clásico: abrir WA con TALLER3.
+  function exito(enviado) {
+    if (enviado) {
+      document.getElementById('exito-titulo').textContent = '¡Listo! 🎉 Revisa tu WhatsApp';
+      document.getElementById('exito-texto').innerHTML = 'Te acabamos de enviar la información completa (temario, fechas e inversión). ¿No te llegó en un minuto? Toca el botón y mándanos la palabra <b style="color:var(--text)">TALLER3</b>:';
+    }
     document.getElementById('form-lead').style.display = 'none';
     document.getElementById('form-exito').style.display = 'block';
   }
@@ -476,9 +482,12 @@ function enviarLead(e) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ nombre: nombre, whatsapp: wa, perfil: perfil, interes: interes, source: 'taller3_landing' })
-    }).then(exito).catch(exito);   // el WA con TALLER3 captura de todos modos
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { exito(d && d.ok === true); })
+    .catch(function () { exito(false); });   // el WA con TALLER3 captura de todos modos
   } else {
-    exito();
+    exito(false);
   }
 }
 
