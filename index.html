@@ -145,7 +145,9 @@ h1,h2,h3 { font-family:var(--serif); font-weight:800; line-height:1.1; letter-sp
 /* ---------- FORMULARIO ---------- */
 .form-panel { background:linear-gradient(160deg,var(--surface),var(--bg-deeper));
   border:1px solid rgba(34,211,238,.28); border-radius:24px; padding:44px 40px; max-width:640px; margin:0 auto; }
-.formulario { display:grid; gap:18px; margin-top:22px; }
+/* minmax(0,1fr) es CLAVE: sin esto el widget de Turnstile (300px fijos) infla
+   la columna del grid y TODOS los campos y el boton se salen del panel en movil. */
+.formulario { display:grid; grid-template-columns:minmax(0,1fr); gap:18px; margin-top:22px; }
 .campo label { display:block; font-weight:600; color:var(--text); font-size:1rem; margin-bottom:7px; }
 .campo label .req-mark { color:var(--cyan); }
 .campo input, .campo select, .campo textarea {
@@ -155,6 +157,12 @@ h1,h2,h3 { font-family:var(--serif); font-weight:800; line-height:1.1; letter-sp
 .campo input:focus, .campo select:focus, .campo textarea:focus { border-color:var(--cyan); }
 .campo textarea { min-height:84px; resize:vertical; }
 .form-err { color:#F87171; font-size:.95rem; display:none; }
+.turnstile-wrap { min-height:65px; }
+.turnstile-wrap .cf-turnstile { transform-origin:left top; }
+/* Recupera 16px utiles en pantallas chicas */
+@media (max-width:400px){ .form-panel { padding:32px 16px; } }
+/* Solo por debajo de 341px el widget de 300px ya no cabe: se escala la CAJA */
+@media (max-width:340px){ .turnstile-wrap .cf-turnstile { transform:scale(.8); width:240px; height:52px; } }
 #form-exito { display:none; text-align:center; margin-top:10px; }
 #form-exito h3 { font-size:1.35rem; margin-bottom:12px; }
 #form-exito p { color:var(--text-sec); margin-bottom:22px; }
@@ -204,6 +212,15 @@ footer .wrap { display:flex; flex-wrap:wrap; justify-content:space-between; alig
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" media="print" onload="this.media='all'">
 <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"></noscript>
+<!-- Turnstile: verifica que quien envía el formulario es una persona. La site key
+     es pública por diseño (se renderiza en el HTML); el secreto vive solo en n8n. -->
+<script>
+// Turnstile puede fallar sin que api.js falle (iframe sin red, reto fallido,
+// VPN marcada). Se declara ANTES de api.js para que el callback exista al render.
+var TS_ROTO = false, TS_INTENTOS = 0;
+function tsFallo() { TS_ROTO = true; }
+</script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body>
 
@@ -385,6 +402,10 @@ footer .wrap { display:flex; flex-wrap:wrap; justify-content:space-between; alig
           <label for="f-interes">¿Qué te gustaría automatizar? (opcional)</label>
           <textarea id="f-interes" placeholder="Ej: contestar los mensajes de clientes de mi tienda sin estar pegado al teléfono"></textarea>
         </div>
+        <div class="campo turnstile-wrap">
+          <div class="cf-turnstile" data-sitekey="0x4AAAAAAEEy3LywGKBLj-dv" data-theme="dark" data-language="es"
+               data-error-callback="tsFallo"></div>
+        </div>
         <div class="form-err" id="form-err">Escribe tu nombre y tu WhatsApp para continuar.</div>
         <div>
           <button type="submit" class="btn-cy" style="width:100%;">Enviar y recibir la info →</button>
@@ -450,7 +471,7 @@ footer .wrap { display:flex; flex-wrap:wrap; justify-content:space-between; alig
 // WaId + ProfileName). Al activar el workflow n8n + proxy /api/lead:
 // poner true y el form además guarda perfil e interés.
 // ============================================================
-var API_LEAD_ACTIVA = false;
+var API_LEAD_ACTIVA = true;
 
 function enviarLead(e) {
   e.preventDefault();
@@ -459,7 +480,30 @@ function enviarLead(e) {
   var perfil  = document.getElementById('f-perfil').value || '';
   var interes = (document.getElementById('f-interes').value || '').trim();
   var err     = document.getElementById('form-err');
-  if (!nombre || wa.replace(/\D/g, '').length < 10) { err.style.display = 'block'; return; }
+  if (!nombre || wa.replace(/\D/g, '').length < 10) {
+    err.textContent = 'Escribe tu nombre y tu WhatsApp para continuar.';
+    err.style.display = 'block';
+    return;
+  }
+
+  // Token de Turnstile. Si el script de Cloudflare no cargó (bloqueado por una
+  // extensión, por ejemplo) NO bloqueamos el envío: se manda sin token, n8n lo
+  // rechaza y la persona termina por el botón de WhatsApp — el lead no se pierde.
+  var campoTs = e.target.querySelector('[name="cf-turnstile-response"]');
+  var token = campoTs ? (campoTs.value || '') : '';
+  if (!token) {
+    TS_INTENTOS++;
+    // Solo se pide reintentar la PRIMERA vez y si el widget no avisó de un fallo:
+    // ahí lo normal es que el reto siga resolviéndose. Si el widget falló, o es el
+    // segundo intento (se quedó colgado en silencio), se deja pasar el envío: n8n
+    // lo rechazará y la persona termina por el botón de WhatsApp. Nunca se queda
+    // encerrada sin poder mandar sus datos.
+    if (!TS_ROTO && TS_INTENTOS < 2 && window.turnstile) {
+      err.textContent = 'Espera un momento a que termine la verificación y vuelve a tocar el botón.';
+      err.style.display = 'block';
+      return;
+    }
+  }
   err.style.display = 'none';
 
   if (typeof fbq === 'function') {
@@ -488,12 +532,15 @@ function enviarLead(e) {
     function liberar() {
       clearTimeout(corte);
       if (btn) { btn.disabled = false; btn.textContent = textoBtn; }
+      // Cada token de Turnstile es de un solo uso: si hay que reintentar, el
+      // widget necesita emitir uno nuevo.
+      try { if (window.turnstile) window.turnstile.reset(); } catch (ex) {}
     }
 
     fetch('/api/lead', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombre: nombre, whatsapp: wa, perfil: perfil, interes: interes, source: 'taller3_landing' }),
+      body: JSON.stringify({ nombre: nombre, whatsapp: wa, perfil: perfil, interes: interes, turnstile_token: token, source: 'taller3_landing' }),
       signal: ctrl.signal
     })
     .then(function (r) { return r.json(); })
