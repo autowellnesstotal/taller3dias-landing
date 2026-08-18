@@ -478,14 +478,27 @@ function enviarLead(e) {
   }
 
   if (API_LEAD_ACTIVA) {
+    // Bloquea el botón mientras viaja el POST y corta a los 8 s: sin esto, una
+    // petición colgada deja el formulario congelado sin ningún feedback.
+    var btn = e.target.querySelector('button[type=submit]');
+    var textoBtn = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+    var ctrl = new AbortController();
+    var corte = setTimeout(function () { ctrl.abort(); }, 8000);
+    function liberar() {
+      clearTimeout(corte);
+      if (btn) { btn.disabled = false; btn.textContent = textoBtn; }
+    }
+
     fetch('/api/lead', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombre: nombre, whatsapp: wa, perfil: perfil, interes: interes, source: 'taller3_landing' })
+      body: JSON.stringify({ nombre: nombre, whatsapp: wa, perfil: perfil, interes: interes, source: 'taller3_landing' }),
+      signal: ctrl.signal
     })
     .then(function (r) { return r.json(); })
-    .then(function (d) { exito(d && d.ok === true); })
-    .catch(function () { exito(false); });   // el WA con TALLER3 captura de todos modos
+    .then(function (d) { liberar(); exito(d && d.enviado === true); })
+    .catch(function () { liberar(); exito(false); });   // el WA con TALLER3 captura de todos modos
   } else {
     exito(false);
   }
